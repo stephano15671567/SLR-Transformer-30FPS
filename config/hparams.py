@@ -1,0 +1,3 @@
+
+# RUTA REAL SEGUN VS CODE
+VIDEO_ROOT = 'D:/ASL2.0/Youtube-ASL/data'
