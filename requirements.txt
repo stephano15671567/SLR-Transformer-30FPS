@@ -1,0 +1,9 @@
+torch>=2.2.0
+pytorch-lightning>=2.1.0
+mediapipe==0.10.9
+opencv-python
+h5py
+pandas
+numpy
+matplotlib
+seaborn
