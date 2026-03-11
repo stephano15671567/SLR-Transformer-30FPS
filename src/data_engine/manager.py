@@ -1,4 +1,4 @@
-import pandas as pd
+ï»¿import pandas as pd
 import h5py
 import os
 import tqdm
@@ -7,43 +7,43 @@ from concurrent.futures import ProcessPoolExecutor
 from src.data_engine.extractor import FeatureExtractor
 from config.hparams import VIDEO_ROOT, CSV_PATH, H5_OUTPUT
 
-def time_to_sec(t):
-    if isinstance(t, (float, int)): return float(t)
-    h, m, s = str(t).split(':')
-    return int(h) * 3600 + int(m) * 60 + float(s)
-
-def procesar_lote_video(video_id, grupo_clips):
-    extractor = FeatureExtractor()
-    v_path = extractor.get_video_path(VIDEO_ROOT, video_id)
-    
-    if not os.path.exists(v_path): return None
-    
-    # Extraemos TODO el video a 30 FPS de una sola vez (Eficiencia Xeon)
+def procesar_video_seguro(video_id):
     try:
-        data_full = extractor.process_video(v_path)
-        return (video_id, data_full, grupo_clips)
+        extractor = FeatureExtractor()
+        v_path = extractor.get_video_path(VIDEO_ROOT, video_id)
+        if not os.path.exists(v_path): return None
+        data = extractor.process_video(v_path)
+        return (video_id, data)
     except:
         return None
 
 if __name__ == '__main__':
+    os.makedirs('data', exist_ok=True)
     df = pd.read_csv(CSV_PATH)
-    df['s_sec'] = df['start_time'].apply(time_to_sec)
+    video_ids = df['video_id'].unique()
     
-    # Agrupamos para abrir cada video una sola vez
-    grupos = list(df.groupby('video_id'))
+    # 1. Verificamos que ya procesamos para no repetir
+    procesados = []
+    if os.path.exists(H5_OUTPUT):
+        with h5py.File(H5_OUTPUT, 'r') as f:
+            procesados = list(f.keys())
     
-    print(f"--- Iniciando Extracción Masiva Xeon V6 (30 FPS) ---")
-    
-    # Usamos h5py para ir guardando en tiempo real (más seguro que npy sueltos)
-    with h5py.File(H5_OUTPUT, 'a') as f:
-        with ProcessPoolExecutor(max_workers=10) as exe:
-            # Enviamos los videos a los 10 núcleos del Xeon
-            tareas = [exe.submit(procesar_lote_video, vid, g) for vid, g in grupos]
-            
-            for t in tqdm.tqdm(tareas, desc="Progreso Videos"):
-                res = t.result()
-                if res:
-                    vid, data, clips = res
-                    if vid not in f:
-                        f.create_dataset(vid, data=data)
-                        f[vid].attrs['total_frames'] = len(data)
+    pendientes = [v for v in video_ids if v not in procesados]
+    print(f"--- Extraccion Reanudada ---")
+    print(f"Total: {len(video_ids)} | Ya listos: {len(procesados)} | Pendientes: {len(pendientes)}")
+
+    if len(pendientes) == 0:
+        print("Â¡Todo el dataset ya esta procesado!")
+    else:
+        # 2. Procesamos en lotes pequeÃ±os para no romper el Pool
+        batch_size = 50
+        with h5py.File(H5_OUTPUT, 'a') as f:
+            for i in range(0, len(pendientes), batch_size):
+                lote = pendientes[i:i+batch_size]
+                with ProcessPoolExecutor(max_workers=6) as executor: # Bajamos a 6 para dar mas aire al Xeon
+                    resultados = list(tqdm.tqdm(executor.map(procesar_video_seguro, lote), 
+                                              total=len(lote), 
+                                              desc=f"Lote {i//batch_size + 1}"))
+                    for res in resultados:
+                        if res and res[0] not in f:
+                            f.create_dataset(res[0], data=res[1])
